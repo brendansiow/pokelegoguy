@@ -55,7 +55,7 @@ dependencies {
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 
     // JSON: build AI request bodies + serialise BotConfig to SharedPrefs
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
     // Encrypted storage for API keys
     implementation("androidx.security:security-crypto:1.1.0-alpha06")

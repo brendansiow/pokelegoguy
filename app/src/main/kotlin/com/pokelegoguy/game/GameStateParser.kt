@@ -85,8 +85,10 @@ class GameStateParser(private val config: BotConfig) {
         // Try "NNN/NNN" format first
         val match = Regex("""(\d+)\s*/\s*(\d+)""").find(text)
         if (match != null) {
-            return match.groupValues[1].toIntOrNull() to match.groupValues[2].toIntOrNull()
-                ?.let { Pair(match.groupValues[1].toInt(), it) } ?: Pair(0, 0)
+            return Pair(
+                match.groupValues[1].toIntOrNull() ?: 0,
+                match.groupValues[2].toIntOrNull() ?: 0
+            )
         }
         // Try standalone number (just current HP)
         val single = Regex("""\b(\d+)\b""").find(text)
