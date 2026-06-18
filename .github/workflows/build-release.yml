@@ -1,0 +1,88 @@
+name: Build & Pre-Release APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: "Version name (e.g. 1.2.0)"
+        required: true
+        default: "1.0.0"
+      release_notes:
+        description: "Release notes"
+        required: false
+        default: "Manual pre-release build"
+
+jobs:
+  build:
+    name: Build Release APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+          cache: gradle
+
+      - name: Grant Gradle wrapper execute permission
+        run: chmod +x gradlew
+
+      - name: Bump versionName in build.gradle.kts
+        run: |
+          VERSION="${{ github.event.inputs.version_name }}"
+          # Derive a versionCode from the version string (e.g. 1.2.3 → 10203)
+          IFS='.' read -r -a parts <<< "$VERSION"
+          MAJOR="${parts[0]:-1}"
+          MINOR="${parts[1]:-0}"
+          PATCH="${parts[2]:-0}"
+          VERSION_CODE=$(( MAJOR * 10000 + MINOR * 100 + PATCH ))
+          sed -i "s/versionCode = [0-9]*/versionCode = $VERSION_CODE/" app/build.gradle.kts
+          sed -i 's/versionName = "[^"]*"/versionName = "'"$VERSION"'"/' app/build.gradle.kts
+          echo "versionCode=$VERSION_CODE" >> "$GITHUB_ENV"
+          echo "versionName=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Build debug APK (unsigned, no keystore needed)
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Locate APK
+        run: |
+          APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+          echo "APK_PATH=$APK_PATH" >> "$GITHUB_ENV"
+          # Rename to include version for clarity
+          NEW_NAME="pokelegoguy-v${{ github.event.inputs.version_name }}-debug.apk"
+          cp "$APK_PATH" "$NEW_NAME"
+          echo "APK_ARTIFACT=$NEW_NAME" >> "$GITHUB_ENV"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pokelegoguy-v${{ github.event.inputs.version_name }}-debug
+          path: ${{ env.APK_ARTIFACT }}
+          retention-days: 30
+
+      - name: Create GitHub pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.event.inputs.version_name }}
+          name: "v${{ github.event.inputs.version_name }} (pre-release)"
+          body: |
+            ## Pokemon Champions OCR Bot — v${{ github.event.inputs.version_name }}
+
+            ${{ github.event.inputs.release_notes }}
+
+            ---
+            ### Installation
+            1. Download the APK below and sideload it onto your Android device.
+            2. Enable **Unknown sources** (or "Install unknown apps") for your file manager.
+            3. Open the installed app, enable the Accessibility Service, enter your AI API key, and tap **Start Bot**.
+
+            > **Debug build** — not minified. For production use, add a signing keystore and switch to `assembleRelease`.
+          files: ${{ env.APK_ARTIFACT }}
+          prerelease: true
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
