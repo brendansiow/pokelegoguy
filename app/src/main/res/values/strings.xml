@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Pokemon Champions Bot</string>
+    <string name="accessibility_service_label">Pokemon Champions Bot</string>
+    <string name="accessibility_service_description">Reads the battle screen and auto-taps moves for Pokemon Champions.</string>
+</resources>

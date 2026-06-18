@@ -1,0 +1,11 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+# Do NOT ignore the Gradle wrapper — it must be committed
+# gradle/wrapper/gradle-wrapper.jar  <-- commit this binary
