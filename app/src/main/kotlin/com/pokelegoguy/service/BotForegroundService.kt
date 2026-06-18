@@ -91,6 +91,8 @@ class BotForegroundService : Service() {
         // Build a map of region label → RegionDef from config
         val regionMap = buildRegionMap(config.regions)
 
+        App.instance.setBotRunning(true)
+
         serviceScope.launch {
             // Watch for MediaProjection revocation
             launch {
@@ -146,6 +148,7 @@ class BotForegroundService : Service() {
         bitmap.recycle()
 
         val action = parseAction(rawAction)
+        App.instance.lastBotAction = rawAction.uppercase().trim().take(10)
         Log.i(TAG, "AI recommended: '$rawAction' → $action")
 
         tapController.executeAction(action, screenWidth, screenHeight, config)
@@ -180,6 +183,7 @@ class BotForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        App.instance.setBotRunning(false)
         serviceScope.cancel()
         runCatching { screenCaptureManager.stop() }
         runCatching { ocrProcessor.close() }

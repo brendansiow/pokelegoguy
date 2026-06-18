@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -12,17 +13,19 @@ import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.pokelegoguy.config.AIProviderType
 import com.pokelegoguy.databinding.ActivityMainBinding
 import com.pokelegoguy.service.BotAccessibilityService
 import com.pokelegoguy.service.BotForegroundService
+import com.pokelegoguy.service.OverlayService
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private val configRepo by lazy { App.instance.configRepository }
+
+    // ─── Activity result launchers ────────────────────────────────────────────
 
     private val projectionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -41,6 +44,15 @@ class MainActivity : AppCompatActivity() {
         else Toast.makeText(this, "Notification permission needed for bot status", Toast.LENGTH_SHORT).show()
     }
 
+    // Returns from ACTION_MANAGE_OVERLAY_PERMISSION settings screen
+    private val overlayPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        // onResume will call syncOverlayCard() to refresh status
+    }
+
+    // ─── Lifecycle ────────────────────────────────────────────────────────────
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -52,12 +64,22 @@ class MainActivity : AppCompatActivity() {
         binding.btnSaveConfig.setOnClickListener { saveConfig() }
         binding.btnOpenAccessibility.setOnClickListener { openAccessibilitySettings() }
         binding.btnStartStop.setOnClickListener { onStartStopClicked() }
+        binding.btnShowOverlay.setOnClickListener { onShowOverlayClicked() }
+        binding.btnHideOverlay.setOnClickListener { onHideOverlayClicked() }
     }
 
     override fun onResume() {
         super.onResume()
         updateAccessibilityStatus()
+        syncOverlayCard()
+        // Keep Start/Stop label in sync with actual bot state
+        if (App.instance.isBotRunning.value) {
+            binding.btnStartStop.text = "Stop Bot"
+            binding.tvBotStatus.text = "Bot is running…"
+        }
     }
+
+    // ─── Provider spinner ─────────────────────────────────────────────────────
 
     private fun setupProviderSpinner() {
         val providers = AIProviderType.values().map { it.name }
@@ -70,16 +92,13 @@ class MainActivity : AppCompatActivity() {
         val config = configRepo.loadConfig()
         val providerIndex = AIProviderType.values().indexOf(config.aiProvider)
         binding.spinnerProvider.setSelection(providerIndex.coerceAtLeast(0))
-        // Show model for currently selected provider
         val model = when (config.aiProvider) {
             AIProviderType.OPENAI    -> config.openAiModel
             AIProviderType.ANTHROPIC -> config.anthropicModel
             AIProviderType.GEMINI    -> config.geminiModel
         }
         binding.editModel.setText(model)
-        // Show masked API key placeholder
-        val existingKey = configRepo.getApiKey(config.aiProvider)
-        if (existingKey != null) {
+        if (configRepo.getApiKey(config.aiProvider) != null) {
             binding.editApiKey.hint = "API key saved (enter new to replace)"
         }
     }
@@ -106,9 +125,10 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, "Settings saved", Toast.LENGTH_SHORT).show()
     }
 
+    // ─── Bot start / stop ─────────────────────────────────────────────────────
+
     private fun onStartStopClicked() {
-        val botRunning = isBotServiceRunning()
-        if (botRunning) {
+        if (App.instance.isBotRunning.value) {
             stopService(Intent(this, BotForegroundService::class.java))
             updateBotStatus("Bot stopped.")
             binding.btnStartStop.text = "Start Bot"
@@ -130,7 +150,8 @@ class MainActivity : AppCompatActivity() {
     private fun requestProjectionPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED) {
+                != PackageManager.PERMISSION_GRANTED
+            ) {
                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 return
             }
@@ -152,6 +173,38 @@ class MainActivity : AppCompatActivity() {
         updateBotStatus("Bot running… watching for battles.")
         binding.btnStartStop.text = "Stop Bot"
     }
+
+    // ─── Overlay ──────────────────────────────────────────────────────────────
+
+    private fun onShowOverlayClicked() {
+        if (!Settings.canDrawOverlays(this)) {
+            // Send user to the per-app overlay permission settings screen
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            )
+            overlayPermissionLauncher.launch(intent)
+        } else {
+            ContextCompat.startForegroundService(this, Intent(this, OverlayService::class.java))
+            Toast.makeText(this, "Overlay launched — switch to the game", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun onHideOverlayClicked() {
+        stopService(Intent(this, OverlayService::class.java))
+    }
+
+    private fun syncOverlayCard() {
+        val canDraw = Settings.canDrawOverlays(this)
+        binding.tvOverlayPermStatus.text = if (canDraw) "Permission: granted ✓" else "Permission: not granted"
+        binding.tvOverlayPermStatus.setTextColor(
+            if (canDraw) getColor(android.R.color.holo_green_dark)
+            else getColor(android.R.color.holo_orange_dark)
+        )
+        binding.btnShowOverlay.text = if (canDraw) "Show Overlay" else "Grant Permission"
+    }
+
+    // ─── Accessibility status ─────────────────────────────────────────────────
 
     private fun openAccessibilitySettings() {
         startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
@@ -181,12 +234,5 @@ class MainActivity : AppCompatActivity() {
             if (splitter.next().equals(target, ignoreCase = true)) return true
         }
         return false
-    }
-
-    private fun isBotServiceRunning(): Boolean {
-        // Simple heuristic: check if the accessibility service reference is live
-        // A more robust check would use ActivityManager, but this is sufficient for a single-user app
-        return App.instance.accessibilityService != null &&
-                binding.btnStartStop.text == "Stop Bot"
     }
 }
